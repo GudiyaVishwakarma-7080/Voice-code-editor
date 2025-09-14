@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice-Enabled Code Editor</title>
+    <title>Voice-Enabled Collaborative Code Editor</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -17,18 +19,35 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            position: relative;
+        }
+        #three-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: -1;
+            display: block;
         }
         .container {
             max-width: 900px;
             width: 100%;
             padding: 2rem;
-            background-color: #21253c;
+            background-color: rgba(33, 37, 60, 0.2);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
             border-radius: 1.5rem;
             box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
             margin: 1rem;
+            position: relative;
+            z-index: 1;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        textarea {
-            background-color: #2c2f46;
+        .container:hover {
+            transform: scale(1.005);
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
+        }
+        textarea, .bg-gray-800, .content-box {
+            background-color: rgba(44, 47, 70, 0.5);
             border-radius: 0.75rem;
             padding: 1rem;
             font-family: monospace;
@@ -37,9 +56,14 @@
             resize: none;
             width: 100%;
             min-height: 250px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .bg-gray-800:hover, textarea:hover, .content-box:hover {
+            transform: scale(1.01);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
         }
         .output-area {
-            background-color: #1f2231;
+            background-color: rgba(31, 34, 49, 0.5);
             border-radius: 0.75rem;
             padding: 1rem;
             min-height: 50px;
@@ -48,6 +72,11 @@
             font-family: monospace;
             white-space: pre-wrap;
             overflow-y: auto;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .output-area:hover {
+            transform: scale(1.01);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
         }
         .btn {
             padding: 0.75rem 1.5rem;
@@ -84,31 +113,89 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .menu-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: rgba(44, 47, 70, 0.5);
+            color: #a4a8d4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .menu-btn:hover {
+            background-color: #556ee6;
+            color: #ffffff;
+            transform: rotate(90deg);
+        }
+        .menu-dropdown {
+            position: absolute;
+            top: 55px;
+            right: 1rem;
+            background-color: rgba(33, 37, 60, 0.9);
+            backdrop-filter: blur(5px);
+            border-radius: 0.75rem;
+            padding: 0.5rem;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+            display: none;
+        }
+        .menu-item {
+            padding: 0.5rem 1rem;
+            color: #a4a8d4;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background-color 0.2s;
+            border-radius: 0.5rem;
+        }
+        .menu-item:hover {
+            background-color: rgba(85, 110, 230, 0.5);
+            color: #ffffff;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white font-inter">
+    <!-- 3D Background Canvas -->
+    <canvas id="three-canvas"></canvas>
 
     <div class="container mx-auto p-8 rounded-3xl shadow-xl">
         <div class="text-center mb-6">
             <h1 class="text-4xl font-extrabold text-blue-400 mb-2">Voice-Enabled Code Editor</h1>
-            <p class="text-gray-300">Apni aawaz se code likhein aur run karein. Bas bolkar command dein.</p>
-            <div id="error-message" class="text-sm mt-4 p-2 rounded-lg text-red-400 bg-red-900 hidden">
-                **Error:** Code chalne mein samasya aa rahi hai. Is app ko ek web server par host kiya jaana zaroori hai.
-            </div>
+            <p class="text-gray-300">Speak to write and run code. Save and share your work.</p>
+        </div>
+        
+        <!-- Menu Button and Dropdown -->
+        <button id="menu-btn" class="menu-btn">
+            <i class="fas fa-ellipsis-h"></i>
+        </button>
+        <div id="menu-dropdown" class="menu-dropdown">
+            <div id="showSavedBtn" class="menu-item"><i class="fas fa-list"></i> Saved Codes</div>
+            <div id="showExplanationBtn" class="menu-item"><i class="fas fa-question-circle"></i> Explanation</div>
+            <div id="newCodeBtn" class="menu-item"><i class="fas fa-plus"></i> New Code</div>
+            <div id="deleteCodeBtn" class="menu-item text-red-400"><i class="fas fa-trash-alt"></i> Delete Code</div>
         </div>
 
-        <div class="space-y-4">
+        <!-- Main Content Area -->
+        <div id="main-content" class="space-y-4">
             <!-- Listening Button and Status -->
             <div class="flex flex-col items-center">
-                <button id="startListeningBtn" class="btn btn-primary px-8 py-3 text-lg">
-                    <span id="btnText">Sunna Shuru Karein</span>
+                <button id="startListeningBtn" class="btn btn-primary px-8 py-3 text-lg" disabled>
+                    <span id="btnText">Initializing...</span>
                 </button>
-                <div id="listeningStatus" class="mt-2 text-sm text-gray-400"></div>
+                <div id="listeningStatus" class="mt-2 text-sm text-gray-400">Please allow microphone access.</div>
             </div>
 
             <!-- User's Prompt Display -->
             <div class="text-center mt-4">
-                <p class="text-lg font-semibold text-gray-200">Aapne bola:</p>
+                <p class="text-lg font-semibold text-gray-200">You said:</p>
                 <div id="userPrompt" class="bg-gray-800 text-gray-200 p-4 rounded-lg mt-2"></div>
             </div>
 
@@ -118,10 +205,17 @@
                 <textarea id="codeEditor" class="w-full bg-gray-800 text-green-300 p-4 rounded-xl border border-gray-700"></textarea>
             </div>
             
-            <!-- Loading and Run Buttons -->
-            <div class="flex items-center gap-4">
-                <button id="runCodeBtn" class="btn btn-primary w-full px-8 py-3 text-lg">Code Chalaayein</button>
-                <div id="loadingIndicator" class="hidden loading-spinner"></div>
+            <!-- Global Control Buttons -->
+            <div class="flex flex-wrap gap-4 justify-center">
+                <button id="saveCodeBtn" class="btn btn-secondary px-6 py-2"><i class="fas fa-save"></i> Save</button>
+                <button id="runCodeBtn" class="btn btn-primary px-6 py-2"><i class="fas fa-play"></i> Run Code</button>
+            </div>
+
+            <!-- Code ID for Sharing -->
+            <div class="mt-4 text-center">
+                <p class="text-sm font-semibold text-gray-400">Current Code ID (Share this):</p>
+                <div id="codeIdDisplay" class="bg-gray-800 text-gray-300 p-2 rounded-lg mt-1 text-sm break-all cursor-pointer" onclick="copyToClipboard(this.textContent)">Click to Copy</div>
+                <div id="statusMessage" class="mt-2 text-sm text-gray-400"></div>
             </div>
 
             <!-- Output Area -->
@@ -130,150 +224,464 @@
                 <div id="output" class="bg-gray-800 text-gray-300 p-4 rounded-xl border border-gray-700 min-h-[50px]"></div>
             </div>
         </div>
+
+        <!-- Saved Codes Section (Initially hidden) -->
+        <div id="saved-content" class="content-box" style="display: none;">
+            <p class="text-lg font-semibold text-gray-200 mb-2">Your Saved Codes:</p>
+            <div id="savedCodesList" class="space-y-4">
+                <!-- Saved codes will be displayed here dynamically -->
+            </div>
+            <div id="savedStatusMessage" class="mt-4 text-sm text-gray-400">Loading saved codes...</div>
+        </div>
+
+        <!-- Explanation Section (Initially hidden) -->
+        <div id="explanation-content" class="content-box" style="display: none;">
+            <p class="text-lg font-semibold text-gray-200 mb-2">Code Explanation:</p>
+            <div id="codeExplanation" class="bg-gray-800 text-gray-300 p-4 rounded-lg min-h-[50px]">
+                Explanation will appear here after code generation.
+            </div>
+        </div>
     </div>
 
     <script type="module">
-        const apiKey = "";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        setLogLevel('debug');
 
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId;
+        let currentCodeId = null;
+
+        // UI elements
         const startListeningBtn = document.getElementById('startListeningBtn');
         const btnText = document.getElementById('btnText');
         const listeningStatus = document.getElementById('listeningStatus');
         const userPromptDiv = document.getElementById('userPrompt');
         const codeEditor = document.getElementById('codeEditor');
         const runCodeBtn = document.getElementById('runCodeBtn');
+        const newCodeBtn = document.getElementById('newCodeBtn');
+        const saveCodeBtn = document.getElementById('saveCodeBtn');
+        const deleteCodeBtn = document.getElementById('deleteCodeBtn');
+        const codeIdDisplay = document.getElementById('codeIdDisplay');
+        const statusMessageDiv = document.getElementById('statusMessage');
         const outputDiv = document.getElementById('output');
-        const loadingIndicator = document.getElementById('loadingIndicator');
-        const errorMessageDiv = document.getElementById('error-message');
+        const codeExplanationDiv = document.getElementById('codeExplanation');
+        const savedCodesListDiv = document.getElementById('savedCodesList');
+        const savedStatusMessageDiv = document.getElementById('savedStatusMessage');
+        
+        const menuBtn = document.getElementById('menu-btn');
+        const menuDropdown = document.getElementById('menu-dropdown');
+        const showSavedBtn = document.getElementById('showSavedBtn');
+        const showExplanationBtn = document.getElementById('showExplanationBtn');
+        const mainContent = document.getElementById('main-content');
+        const savedContent = document.getElementById('saved-content');
+        const explanationContent = document.getElementById('explanation-content');
 
-        // Check for local file execution and display a warning
-        if (window.location.protocol === 'file:') {
-            errorMessageDiv.classList.remove('hidden');
-        }
+        // Initialize Firebase
+        const initFirebase = async () => {
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
 
-        if (!('webkitSpeechRecognition' in window)) {
-            listeningStatus.textContent = "Maaf kijiye, aapka browser voice recognition ko support nahi karta.";
-            startListeningBtn.disabled = true;
-        }
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } catch (error) {
+                    await signInAnonymously(auth);
+                }
 
-        const recognition = new webkitSpeechRecognition();
-        recognition.lang = 'hi-IN'; // Hindi mein aawaz pehchan ke liye
-        recognition.interimResults = false;
-        recognition.continuous = false;
+                userId = auth.currentUser?.uid || 'anonymous';
+                console.log(`User ID: ${userId}`);
 
-        let isListening = false;
+                const urlParams = new URLSearchParams(window.location.search);
+                const codeIdFromUrl = urlParams.get('id');
 
-        recognition.onstart = () => {
-            isListening = true;
-            btnText.textContent = 'Sun raha hoon...';
-            listeningStatus.textContent = 'Bolna shuru karein...';
-            startListeningBtn.disabled = true;
-        };
+                if (codeIdFromUrl) {
+                    loadCode(codeIdFromUrl);
+                } else {
+                    newCode();
+                }
 
-        recognition.onend = () => {
-            isListening = false;
-            btnText.textContent = 'Sunna Shuru Karein';
-            listeningStatus.textContent = '';
-            startListeningBtn.disabled = false;
-        };
+                // Set up real-time listener for saved codes
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'codes'));
+                onSnapshot(q, (snapshot) => {
+                    const codes = [];
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        codes.push({ id: doc.id, ...data });
+                    });
+                    displaySavedCodes(codes);
+                }, (error) => {
+                    console.error("Error fetching saved codes:", error);
+                    savedStatusMessageDiv.textContent = "Error loading saved codes.";
+                });
 
-        recognition.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            userPromptDiv.textContent = transcript;
-            generateCode(transcript);
-        };
-
-        recognition.onerror = (event) => {
-            listeningStatus.textContent = `Aawaz pehchan mein error: ${event.error}`;
-            console.error('Speech Recognition Error:', event.error);
-        };
-
-        startListeningBtn.addEventListener('click', () => {
-            if (!isListening) {
-                recognition.start();
+            } else {
+                displayStatusMessage("Firebase is not configured. Save and share features will not work.", true);
+                newCode();
             }
-        });
+        };
 
-        async function generateCode(prompt) {
-            loadingIndicator.classList.remove('hidden');
-            outputDiv.textContent = 'Code generate ho raha hai...';
+        const generateId = () => {
+            return Math.random().toString(36).substring(2, 9);
+        };
+
+        const displayStatusMessage = (message, isError = false) => {
+            statusMessageDiv.textContent = message;
+            statusMessageDiv.style.color = isError ? '#f87171' : '#a4a8d4';
+        };
+
+        const loadCode = async (id) => {
+            currentCodeId = id;
+            codeIdDisplay.textContent = id;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'codes', id);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    codeEditor.value = data.code || '';
+                    userPromptDiv.textContent = data.prompt || 'Code loaded from database.';
+                    codeExplanationDiv.textContent = data.explanation || 'No explanation available.';
+                    displayStatusMessage(`Code ID ${id} loaded successfully.`, false);
+                } else {
+                    displayStatusMessage(`No code found with ID ${id}. Starting a new session.`, true);
+                    newCode();
+                }
+            } catch (error) {
+                console.error("Error loading document:", error);
+                displayStatusMessage("Error loading code. Check console for details.", true);
+                newCode();
+            }
+        };
+
+        const saveCode = async () => {
+            if (!db || !currentCodeId) {
+                displayStatusMessage("Cannot save. Database not initialized or no current code.", true);
+                return;
+            }
+            try {
+                const codeData = {
+                    code: codeEditor.value,
+                    prompt: userPromptDiv.textContent,
+                    explanation: codeExplanationDiv.textContent,
+                    timestamp: new Date().toISOString(),
+                    userId: userId
+                };
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'codes', currentCodeId);
+                await setDoc(docRef, codeData);
+                displayStatusMessage(`Code saved with ID: ${currentCodeId}`, false);
+            } catch (error) {
+                console.error("Error saving document:", error);
+                displayStatusMessage("Error saving code. Check console for details.", true);
+            }
+        };
+
+        const newCode = () => {
+            currentCodeId = generateId();
+            codeIdDisplay.textContent = currentCodeId;
             codeEditor.value = '';
+            userPromptDiv.textContent = 'Speak a command to generate code.';
+            outputDiv.textContent = '';
+            codeExplanationDiv.textContent = 'Explanation will appear here after code generation.';
+            displayStatusMessage("New code session started.", false);
+            mainContent.style.display = 'block';
+            savedContent.style.display = 'none';
+            explanationContent.style.display = 'none';
+        };
 
-            const systemPrompt = "Aap ek expert programmer hain. Aapko alag alag programming languages mein code likhna hai. Jab aapko koi command diya jaye, to aapko sirf aur sirf ek poora aur chalne wala code likhna hai. Code ke alawa kuch aur mat likhna. Koi comments, explanations ya extra text nahi. Code mein `console.log` ya `print` statement shamil karein taki nateeja dikhe. Agar koi bhasha batayi na jaye, to JavaScript mein code likhein.";
+        const deleteCode = async () => {
+            if (!db || !currentCodeId) {
+                displayStatusMessage("Cannot delete. Database not initialized or no current code.", true);
+                return;
+            }
+            if (confirm("Are you sure you want to delete this code? This action cannot be undone.")) {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'codes', currentCodeId));
+                    displayStatusMessage(`Code with ID ${currentCodeId} deleted successfully.`, false);
+                    newCode();
+                } catch (error) {
+                    console.error("Error deleting document:", error);
+                    displayStatusMessage("Error deleting code. Check console for details.", true);
+                }
+            }
+        };
+
+        // LLM API integration
+        const generateCodeAndExplanation = async (prompt) => {
+            const systemPrompt = "You are a code generation expert. Your task is to provide a complete, runnable code snippet and a brief, easy-to-understand explanation for it. The explanation should be in a separate JSON field. The code must be in the language specified by the user. If no language is specified, default to JavaScript. Only provide the JSON object in the response. Do not include any other text, comments, or markdown formatting outside of the JSON.";
             
-            const userQuery = `"${prompt}". Is command ke liye poora, chalne wala aur achcha format kiya hua code likhein.`;
-
             const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
+                contents: [{ parts: [{ text: prompt }] }],
                 systemInstruction: {
                     parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "code": { "type": "STRING" },
+                            "explanation": { "type": "STRING" }
+                        },
+                        "propertyOrdering": ["code", "explanation"]
+                    }
                 }
             };
-
+            
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            
             try {
-                let response = await fetch(apiUrl, {
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
                 }
-
+                
                 const result = await response.json();
-                const generatedCode = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (generatedCode) {
-                    codeEditor.value = generatedCode;
-                    outputDiv.textContent = 'Code safaltapoorvak generate ho gaya. "Code Chalaayein" par click karke dekhein.';
-                } else {
-                    outputDiv.textContent = 'Code generate nahi ho paya. Dobara koshish karein.';
-                }
+                const jsonText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+                return JSON.parse(jsonText);
             } catch (error) {
-                console.error('Code generate karte samay error:', error);
-                outputDiv.textContent = `Error: ${error.message}. Is app ko online chalaana zaroori hai.`;
-            } finally {
-                loadingIndicator.classList.add('hidden');
+                console.error("API call failed:", error);
+                displayStatusMessage("Error generating code. API call failed. See console for details.", true);
+                return { code: "// Error: Could not generate code.", explanation: "Failed to fetch code and explanation from the API." };
             }
-        }
+        };
 
-        runCodeBtn.addEventListener('click', () => {
-            const codeToRun = codeEditor.value;
-            if (!codeToRun) {
-                outputDiv.textContent = "Pehle code generate karein.";
-                return;
-            }
-            
-            const originalConsoleLog = console.log;
-            let output = '';
-            console.log = (...args) => {
-                output += args.map(arg => {
-                    if (typeof arg === 'object') {
-                        return JSON.stringify(arg, null, 2);
-                    }
-                    return String(arg);
-                }).join(' ') + '\n';
+        // Voice recognition
+        let recognition = null;
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                btnText.textContent = "Listening...";
+                startListeningBtn.disabled = true;
+                listeningStatus.textContent = "Please speak now.";
+                displayStatusMessage("Listening for your command...", false);
             };
 
+            recognition.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript;
+                userPromptDiv.textContent = transcript;
+                displayStatusMessage("Generating code and explanation...", false);
+                const result = await generateCodeAndExplanation(transcript);
+                
+                codeEditor.value = result.code;
+                codeExplanationDiv.textContent = result.explanation;
+
+                displayStatusMessage("Code generated successfully!", false);
+                saveCode();
+                
+                btnText.textContent = "Start Listening";
+                startListeningBtn.disabled = false;
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech recognition error:", event);
+                displayStatusMessage(`Speech recognition error: ${event.error}. Please check microphone settings.`, true);
+                btnText.textContent = "Start Listening";
+                startListeningBtn.disabled = false;
+            };
+
+            recognition.onend = () => {
+                btnText.textContent = "Start Listening";
+                startListeningBtn.disabled = false;
+                listeningStatus.textContent = "Click to speak.";
+            };
+        } else {
+            btnText.textContent = "Not Supported";
+            displayStatusMessage("Speech recognition is not supported in this browser.", true);
+        }
+
+        const requestMicrophoneAccess = async () => {
             try {
-                // Yahan check karen ki code kis bhasha ka hai.
-                if (codeToRun.includes('def ') || codeToRun.includes('import ') || codeToRun.includes('class ') || codeToRun.includes('public static void main')) {
-                    outputDiv.textContent = "Maaf kijiye, yah code JavaScript ke alawa kisi aur bhasha ka hai. Yah editor sirf JavaScript code chala sakta hai. Aap is code ko copy kar sakte hain.";
-                } else {
-                    // Yahan hum code ko surakshit roop se chala rahe hain.
-                    (new Function(codeToRun))();
-                    outputDiv.textContent = output || 'Code safaltapoorvak chal gaya. Koi output nahi hai.';
-                }
-            } catch (error) {
-                outputDiv.textContent = `Code mein error: ${error.message}`;
-            } finally {
-                console.log = originalConsoleLog;
+                await navigator.mediaDevices.getUserMedia({ audio: true });
+                displayStatusMessage("Microphone access granted. You can now start listening.", false);
+                startListeningBtn.disabled = false;
+                btnText.textContent = "Start Listening";
+            } catch (err) {
+                console.error("Microphone access denied:", err);
+                displayStatusMessage("Microphone access denied. Please enable it in your browser settings to use this feature.", true);
+            }
+        };
+
+        // Event Listeners
+        startListeningBtn.addEventListener('click', () => {
+            if (recognition) {
+                recognition.start();
             }
         });
 
-        codeEditor.value = `// Bolne ke liye "Sunna Shuru Karein" button par click karein.
-// Udaharan: "Python mein factorial ka code likho" ya "JavaScript mein array reverse karne ka code likho"`;
+        runCodeBtn.addEventListener('click', () => {
+            try {
+                const code = codeEditor.value;
+                const originalLog = console.log;
+                let output = '';
+                console.log = (message) => {
+                    output += message + '\n';
+                };
+                eval(code);
+                outputDiv.textContent = output;
+                console.log = originalLog;
+            } catch (error) {
+                outputDiv.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        // Menu and content toggling
+        menuBtn.addEventListener('click', () => {
+            menuDropdown.style.display = menuDropdown.style.display === 'block' ? 'none' : 'block';
+        });
+
+        showSavedBtn.addEventListener('click', () => {
+            mainContent.style.display = 'none';
+            savedContent.style.display = 'block';
+            explanationContent.style.display = 'none';
+            menuDropdown.style.display = 'none';
+        });
+
+        showExplanationBtn.addEventListener('click', () => {
+            mainContent.style.display = 'none';
+            savedContent.style.display = 'none';
+            explanationContent.style.display = 'block';
+            menuDropdown.style.display = 'none';
+        });
+        
+        newCodeBtn.addEventListener('click', newCode);
+        saveCodeBtn.addEventListener('click', saveCode);
+        deleteCodeBtn.addEventListener('click', deleteCode);
+
+        const displaySavedCodes = (codes) => {
+            savedCodesListDiv.innerHTML = '';
+            if (codes.length === 0) {
+                savedStatusMessageDiv.textContent = "No saved codes found. Create a new one!";
+            } else {
+                savedStatusMessageDiv.textContent = "Click on a code to load it.";
+                codes.forEach(code => {
+                    const codeItem = document.createElement('div');
+                    codeItem.className = 'bg-gray-700 text-gray-200 p-4 rounded-lg cursor-pointer transition transform hover:scale-101 hover:bg-gray-600';
+                    codeItem.textContent = `ID: ${code.id} - Prompt: "${code.prompt}"`;
+                    codeItem.onclick = () => {
+                        loadCode(code.id);
+                        mainContent.style.display = 'block';
+                        savedContent.style.display = 'none';
+                        explanationContent.style.display = 'none';
+                    };
+                    savedCodesListDiv.appendChild(codeItem);
+                });
+            }
+        };
+
+        // Utility function to copy to clipboard
+        window.copyToClipboard = (text) => {
+            try {
+                const tempInput = document.createElement('input');
+                document.body.appendChild(tempInput);
+                tempInput.value = text;
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                displayStatusMessage("URL copied to clipboard!", false);
+            } catch (err) {
+                console.error("Failed to copy text:", err);
+                displayStatusMessage("Failed to copy. Please copy manually.", true);
+            }
+        };
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            initFirebase();
+            if (recognition) {
+                requestMicrophoneAccess();
+            }
+        });
+    </script>
+    <script>
+        // 3D Background Animation with Three.js
+        let scene, camera, renderer, particles;
+        const canvas = document.getElementById('three-canvas');
+        
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 2;
+            
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            
+            // Particles
+            const particleCount = 2000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const sizes = new Float32Array(particleCount);
+            
+            for (let i = 0; i < particleCount; i++) {
+                positions[i * 3 + 0] = (Math.random() - 0.5) * 10;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+                sizes[i] = Math.random() * 0.1 + 0.05;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0x88c0d4,
+                size: 0.05,
+                sizeAttenuation: true,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                opacity: 0.8
+            });
+            
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Animate particles
+            particles.rotation.y += 0.0005;
+            particles.rotation.x += 0.0002;
+            
+            // Animate camera
+            camera.rotation.y += 0.0002;
+            camera.position.z += Math.sin(Date.now() * 0.0002) * 0.0005;
+
+            renderer.render(scene, camera);
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        window.addEventListener('resize', onWindowResize);
+        
+        window.onload = function() {
+            init();
+            animate();
+        };
     </script>
 </body>
 </html>
